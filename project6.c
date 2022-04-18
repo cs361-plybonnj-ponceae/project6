@@ -1,8 +1,8 @@
 /* CS 361 project6.c
 
-  Team: 
-  Names: 
-  Honor Code Statement: 
+  Team: 07
+  Names: Adrien Ponce & Nic Plybon
+  Honor Code Statement: This code complies with the JMU Honor Code
 
 */
 
@@ -41,26 +41,33 @@ int main(int argc, char *argv[])
     int num_clusters;
     pthread_t processor[NUM_THREADS];
 
+    // The user must supply a data file to be used as input
     if (argc != 2) {
         printf("Usage: %s data_file\n", argv[0]);
         return 1;
     }
 
+    // Open input file for reading, exiting with error if open() fails
     input_fd = open(argv[1], O_RDONLY);
     if (input_fd < 0) {
         printf("Error opening file \"%s\" for reading: %s\n", argv[1], strerror(errno));
         return 1;
     }
 
+    // Determine the file size of the input file
     file_size = lseek(input_fd, 0, SEEK_END);
     close(input_fd);
 
+    // Calculate how many clusters are present
     num_clusters = file_size / CLUSTER_SIZE;
+
+    // Generate the names for the tasks and results queue
     snprintf(tasks_mq_name, 16, "/tasks_%s", getlogin());
     tasks_mq_name[15] = '\0';
     snprintf(results_mq_name, 18, "/results_%s", getlogin());
     results_mq_name[17] = '\0';
 
+    // Create the child processes
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid = fork();
         if (pid == -1)
