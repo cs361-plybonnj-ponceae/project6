@@ -108,8 +108,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // create classify task and populate the struct
-
     // send a classify task for every cluster
     
     // Phase 2
