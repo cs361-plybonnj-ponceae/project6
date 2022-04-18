@@ -19,23 +19,18 @@
 #include "common.h"
 #include "classify.h"
 #include "intqueue.h"
-
-
+    
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
 
-
-
 void *process_result(void *arg) {
-
     char recv_buffer[MESSAGE_SIZE_MAX];
+    printf("Processing \n");
     if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
-        printf("Error receiving message from results: %s\n", strerror(errno));
-        return NULL;
-    }
-
-
-
+        printf("Error receiving message from results queue: %s\n", strerror(errno));
+        return 1;
+    }   
+    printf("Receiving done \n");
     return NULL;
 
 }
@@ -91,8 +86,7 @@ int main(int argc, char *argv[])
         }
     }
 
-
-    // open tasks message queue 
+    // Opens the task messages and results queue in blocking mode
     if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
         return 1;
@@ -107,27 +101,20 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < NUM_THREADS; i++) 
         pthread_create(&(processor[i]), NULL, process_result, NULL);
-    
-    // Phase 1
-    for (int i = 0; i < num_clusters; i++) {
-        new_task.task_type = TASK_CLASSIFY;
-        new_task.task_cluster = i;
-        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
-            printf("Error sending to tasks queue: %s\n", strerror(errno));
-            return 1;
-        }
-
-        printf("cluster type %d, cluster number %d", new_task.task_type, new_task.task_cluster);
-
-
-
-
+        
+    // Phase 1: Generate classification tasks and process results
+    new_task.task_type = TASK_CLASSIFY;
+    new_task.task_cluster = 1;
+    if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
+        printf("Error sending to tasks queue: %s\n", strerror(errno));
+        return 1;
     }
 
+    // send a classify task for every cluster
     
     // Phase 2
 
-    // Phase 3
+    // Phase 3: Generate termination tasks
     new_task.task_type = TASK_TERMINATE;
     for (int i = 0; i < NUM_PROCESSES; i++) {
         // send to tasks queue
@@ -140,10 +127,10 @@ int main(int argc, char *argv[])
     wait(NULL);
     //close any open mqds
     mq_close(tasks_mqd);
-    mq_close(results_mqd);
+    // mq_close(results_mqd);
     //unlink mqueues
     mq_unlink(tasks_mq_name);
-    mq_unlink(results_mq_name);
+    // mq_unlink(results_mq_name);
     //terminates itself
     return 0;
 };
