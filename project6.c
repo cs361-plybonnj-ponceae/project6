@@ -22,17 +22,32 @@
     
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
+int classification_fd;
+static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
+    struct result *new_result;
     printf("Processing \n");
-    if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
-        printf("Error receiving message from results queue: %s\n", strerror(errno));
-        return 1;
-    }   
-    printf("Receiving done \n");
-    return NULL;
+    while (1) {
+        if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
+            printf("Error receiving message from results queue: %s\n", strerror(errno));
+            return NULL;
+        }  
+     
+        new_result = (struct result *)recv_buffer;
 
+        // Start of critical section
+        pthread_mutex_lock(&counter_lock);
+        
+        lseek(classification_fd, new_result->res_cluster_number, SEEK_SET);
+        ++new_result->res_cluster_number;
+        // printf("%d\n", new_result->res_cluster_number);
+
+        // End of critical section
+        pthread_mutex_unlock(&counter_lock);
+    }
+    return NULL;
 }
 
 int main(int argc, char *argv[])
@@ -60,6 +75,14 @@ int main(int argc, char *argv[])
     input_fd = open(argv[1], O_RDONLY);
     if (input_fd < 0) {
         printf("Error opening file \"%s\" for reading: %s\n", argv[1], strerror(errno));
+        return 1;
+    }
+
+    // Open classification file for writing. Create file if it does not
+    // exist. Exit with error if open() fails.
+    classification_fd = open(CLASSIFICATION_FILE, O_RDWR | O_CREAT, 0600);
+    if (classification_fd < 0) {
+        printf("Error creating file \"%s\": %s\n", CLASSIFICATION_FILE, strerror(errno));
         return 1;
     }
 
@@ -97,15 +120,25 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    for (int i = 0; i < NUM_THREADS; i++) 
+    // Create NUM_THREAD threads to process from results queue
+    for (int i = 0; i < NUM_THREADS; i++) {
         pthread_create(&(processor[i]), NULL, process_result, NULL);
-        
+    }    
+
     // Phase 1: Generate classification tasks and process results
-    new_task.task_type = TASK_CLASSIFY;
-    new_task.task_cluster = 1;
-    if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
-        printf("Error sending to tasks queue: %s\n", strerror(errno));
-        return 1;
+    for (int i = 0; i < num_clusters; i++) {
+        new_task.task_type = TASK_CLASSIFY;
+        new_task.task_cluster = 0;
+        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;
+        }
+    }
+
+    // Wait for all threads to finish processing 
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(processor[i], NULL);
+        printf("Threads terminated.\n");
     }
 
     // send a classify task for every cluster
