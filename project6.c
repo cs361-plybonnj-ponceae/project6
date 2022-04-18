@@ -20,15 +20,23 @@
 #include "classify.h"
 #include "intqueue.h"
     
+mqd_t tasks_mqd, results_mqd; // message queue descriptors
+struct mq_attr attributes;
 
 void *process_result(void *arg) {
+    char recv_buffer[MESSAGE_SIZE_MAX];
+    printf("Processing \n");
+    if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
+        printf("Error receiving message from results queue: %s\n", strerror(errno));
+        return 1;
+    }   
+    printf("Receiving done \n");
     return NULL;
 
 }
 
 int main(int argc, char *argv[])
 {
-    mqd_t tasks_mqd, results_mqd; // message queue descriptors
     int input_fd;
     pid_t pid;
     off_t file_size;
@@ -37,7 +45,6 @@ int main(int argc, char *argv[])
     struct task new_task;
     int num_clusters;
     pthread_t processor[NUM_THREADS];
-    struct mq_attr attributes;
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
     attributes.mq_msgsize = MESSAGE_SIZE_MAX;
@@ -69,11 +76,6 @@ int main(int argc, char *argv[])
     snprintf(results_mq_name, 18, "/results_%s", getlogin());
     results_mq_name[17] = '\0';
 
-    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
-        printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
-        return 1;
-    }
-
     // Create the child processes
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid = fork();
@@ -85,34 +87,38 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Opens the task messages queue in blocking mode
+    // Opens the task messages and results queue in blocking mode
     if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+        return 1;
+    }
+    if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+        printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
         return 1;
     }
 
     for (int i = 0; i < NUM_THREADS; i++) 
         pthread_create(&(processor[i]), NULL, process_result, NULL);
-    
+        
     // Phase 1: Generate classification tasks and process results
+    new_task.task_type = TASK_CLASSIFY;
+    new_task.task_cluster = 1;
+    if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
+        printf("Error sending to tasks queue: %s\n", strerror(errno));
+        return 1;
+    }
 
     // create classify task and populate the struct
-    struct task classify;
-    classify.task_type = TASK_CLASSIFY;
-    classify.task_cluster = 0;
 
     // send a classify task for every cluster
-    for (int i = num_clusters; i > 0; i--) {
-        // printf("%d\n", i);
-    }
     
     // Phase 2
 
-    // Phase 3
+    // Phase 3: Generate termination tasks
     new_task.task_type = TASK_TERMINATE;
     for (int i = 0; i < NUM_PROCESSES; i++) {
         // send to tasks queue
-        if (mq_send(tasks_mqd, (const char *) &terminate, sizeof(terminate), 0) < 0) {
+        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }
@@ -121,10 +127,10 @@ int main(int argc, char *argv[])
     wait(NULL);
     //close any open mqds
     mq_close(tasks_mqd);
-    mq_close(results_mqd);
+    // mq_close(results_mqd);
     //unlink mqueues
     mq_unlink(tasks_mq_name);
-    mq_unlink(results_mq_name);
+    // mq_unlink(results_mq_name);
     //terminates itself
     return 0;
 };
