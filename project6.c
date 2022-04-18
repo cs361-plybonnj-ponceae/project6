@@ -1,9 +1,7 @@
 /* CS 361 project6.c
-
   Team: 07
-  Names: Adrien Ponce & Nic Plybon
-  Honor Code Statement: This code complies with the JMU Honor Code
-
+  Names: Nic Plybon & Adrien Ponce
+  Honor Code Statement: This code complies with the JMU Honor Code.
 */
 
 #include <stdio.h>
@@ -21,25 +19,29 @@
 #include "common.h"
 #include "classify.h"
 #include "intqueue.h"
-
+    
 
 void *process_result(void *arg) {
-
     return NULL;
 
 }
 
 int main(int argc, char *argv[])
 {
+    mqd_t tasks_mqd, results_mqd; // message queue descriptors
     int input_fd;
     pid_t pid;
     off_t file_size;
-    struct mq_attr attr;
     char tasks_mq_name[16];
     char results_mq_name[18];
     struct task new_task;
     int num_clusters;
     pthread_t processor[NUM_THREADS];
+    struct mq_attr attributes;
+    attributes.mq_flags = 0;
+    attributes.mq_maxmsg = 1000;
+    attributes.mq_msgsize = MESSAGE_SIZE_MAX;
+    attributes.mq_curmsgs = 0;
 
     // The user must supply a data file to be used as input
     if (argc != 2) {
@@ -83,9 +85,13 @@ int main(int argc, char *argv[])
         }
     }
 
-    for (int i = 0; i < NUM_THREADS; i++)
+    // Opens the task messages queue in blocking mode
+    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+        printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+        return 1;
+    }
 
-        // create NUM_THREADS processor threads
+    for (int i = 0; i < NUM_THREADS; i++) 
         pthread_create(&(processor[i]), NULL, process_result, NULL);
     
     // Phase 1: Generate classification tasks and process results
@@ -103,6 +109,22 @@ int main(int argc, char *argv[])
     // Phase 2
 
     // Phase 3
-
+    new_task.task_type = TASK_TERMINATE;
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        // send to tasks queue
+        if (mq_send(tasks_mqd, (const char *) &terminate, sizeof(terminate), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;
+        }
+    }
+    //wait for children to terminate
+    wait(NULL);
+    //close any open mqds
+    mq_close(tasks_mqd);
+    mq_close(results_mqd);
+    //unlink mqueues
+    mq_unlink(tasks_mq_name);
+    mq_unlink(results_mq_name);
+    //terminates itself
     return 0;
 };
