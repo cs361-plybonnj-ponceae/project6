@@ -1,15 +1,7 @@
 /* CS 361 project6.c
-<<<<<<< HEAD
   Team: 07
   Names: Nic Plybon & Adrien Ponce
   Honor Code Statement: This code complies with the JMU Honor Code.
-=======
-
-  Team: 07
-  Names: Adrien Ponce & Nic Plybon
-  Honor Code Statement: This code complies with the JMU Honor Code
-
->>>>>>> bbcb45b93369b3d1cf05beb65414dfe6de826899
 */
 
 #include <stdio.h>
@@ -28,15 +20,25 @@
 #include "classify.h"
 #include "intqueue.h"
 
-mqd_t tasks_mqd, results_mqd; // message queue descriptors
 
-    
+mqd_t tasks_mqd, results_mqd; // message queue descriptors
+struct mq_attr attributes;
+
+
 
 void *process_result(void *arg) {
+
+    char recv_buffer[MESSAGE_SIZE_MAX];
+    if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
+        printf("Error receiving message from results: %s\n", strerror(errno));
+        return NULL;
+    }
+
+
+
     return NULL;
 
 }
-
 int main(int argc, char *argv[])
 {
     int input_fd;
@@ -47,7 +49,6 @@ int main(int argc, char *argv[])
     struct task new_task;
     int num_clusters;
     pthread_t processor[NUM_THREADS];
-    struct mq_attr attributes;
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
     attributes.mq_msgsize = MESSAGE_SIZE_MAX;
@@ -91,29 +92,46 @@ int main(int argc, char *argv[])
     }
 
 
-
+    // open tasks message queue 
     if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
         return 1;
     }
+
+    // open results message queue 
     if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
         return 1;
     }
 
+
     for (int i = 0; i < NUM_THREADS; i++) 
         pthread_create(&(processor[i]), NULL, process_result, NULL);
     
     // Phase 1
+    for (int i = 0; i < num_clusters; i++) {
+        new_task.task_type = TASK_CLASSIFY;
+        new_task.task_cluster = i;
+        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;
+        }
+
+        printf("cluster type %d, cluster number %d", new_task.task_type, new_task.task_cluster);
+
+
+
+
+    }
+
     
     // Phase 2
 
     // Phase 3
-    struct task terminate;
-    terminate.task_type = TASK_TERMINATE;
+    new_task.task_type = TASK_TERMINATE;
     for (int i = 0; i < NUM_PROCESSES; i++) {
         // send to tasks queue
-        if (mq_send(tasks_mqd, (const char *) &terminate, sizeof(terminate), 0) < 0) {
+        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }
