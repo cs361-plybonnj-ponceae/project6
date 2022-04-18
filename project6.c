@@ -67,6 +67,11 @@ int main(int argc, char *argv[])
     snprintf(results_mq_name, 18, "/results_%s", getlogin());
     results_mq_name[17] = '\0';
 
+    if ((tasks_mqd = mq_open(tasks_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
+        printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
+        return 1;
+    }
+
     // Create the child processes
     for (int i = 0; i < NUM_PROCESSES; i++) {
         pid = fork();
@@ -79,9 +84,21 @@ int main(int argc, char *argv[])
     }
 
     for (int i = 0; i < NUM_THREADS; i++)
+
+        // create NUM_THREADS processor threads
         pthread_create(&(processor[i]), NULL, process_result, NULL);
     
-    // Phase 1
+    // Phase 1: Generate classification tasks and process results
+
+    // create classify task and populate the struct
+    struct task classify;
+    classify.task_type = TASK_CLASSIFY;
+    classify.task_cluster = 0;
+
+    // send a classify task for every cluster
+    for (int i = num_clusters; i > 0; i--) {
+        // printf("%d\n", i);
+    }
     
     // Phase 2
 
