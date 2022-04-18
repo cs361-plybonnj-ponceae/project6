@@ -27,15 +27,16 @@ static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
-    struct result *new_result;
     printf("Processing \n");
-    while (1) {
+    while(1) {
         if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
-            return NULL;
-        }  
-     
-        new_result = (struct result *)recv_buffer;
+            return 1;
+        }   
+    
+    }
+
+    return NULL;
 
         // Start of critical section
         pthread_mutex_lock(&counter_lock);
@@ -49,7 +50,6 @@ void *process_result(void *arg) {
     }
     return NULL;
 }
-
 int main(int argc, char *argv[])
 {
     int input_fd;
@@ -115,31 +115,35 @@ int main(int argc, char *argv[])
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
         return 1;
     }
+
+    // open results message queue 
     if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
         return 1;
     }
 
-    // Create NUM_THREAD threads to process from results queue
+
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_create(&(processor[i]), NULL, process_result, NULL);
-    }    
-
+    }
+        
     // Phase 1: Generate classification tasks and process results
+    new_task.task_type = TASK_CLASSIFY;
+    new_task.task_cluster = 0;
     for (int i = 0; i < num_clusters; i++) {
-        new_task.task_type = TASK_CLASSIFY;
-        new_task.task_cluster = 0;
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
-            return 1;
+        return 1;
         }
+                    printf("sent %d\n", new_task.task_cluster);
+
+        new_task.task_cluster++;
+    
+
+
     }
 
-    // Wait for all threads to finish processing 
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(processor[i], NULL);
-        printf("Threads terminated.\n");
-    }
+  
 
     // send a classify task for every cluster
     
