@@ -15,6 +15,7 @@
 #include <mqueue.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/wait.h>
 
 #include "common.h"
 #include "classify.h"
@@ -22,15 +23,20 @@
     
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
+int num_clusters;
+
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
+    struct result *new_result;
     while(1) {
         if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
-            return 1;
-        }   
-    
+            return NULL;
+        }         
+    new_result = (struct result *) recv_buffer;
+    printf("Cluster number %d\n", new_result->res_cluster_number);
+
     }
 
     return NULL;
@@ -44,7 +50,6 @@ int main(int argc, char *argv[])
     char tasks_mq_name[16];
     char results_mq_name[18];
     struct task new_task;
-    int num_clusters;
     pthread_t processor[NUM_THREADS];
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
@@ -111,19 +116,15 @@ int main(int argc, char *argv[])
     for (int i = 0; i < num_clusters; i++) {
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
-        return 1;
+            return 1;
         }
-                    printf("sent %d\n", new_task.task_cluster);
-
         new_task.task_cluster++;
-    
-
-
     }
 
-  
-
-    // send a classify task for every cluster
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(processor[i], NULL);
+    }
+      
     
     // Phase 2
 
@@ -140,10 +141,10 @@ int main(int argc, char *argv[])
     wait(NULL);
     //close any open mqds
     mq_close(tasks_mqd);
-    // mq_close(results_mqd);
+    mq_close(results_mqd);
     //unlink mqueues
     mq_unlink(tasks_mq_name);
-    // mq_unlink(results_mq_name);
+    mq_unlink(results_mq_name);
     //terminates itself
     return 0;
 };
