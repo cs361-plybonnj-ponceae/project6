@@ -37,8 +37,6 @@ void *process_result(void *arg) {
     // Initialize an empty queue to store the clusters that have file headers.
     initqueue(&headerq);
 
-    printf("Processing \n");
-
     // Keep receiving from the results queue until there are no clusters left to process
     while(clusters_processed != num_clusters) {
 
@@ -152,31 +150,35 @@ int main(int argc, char *argv[])
     }
         
     // Phase 1: Generate classification tasks and process results
+
     new_task.task_type = TASK_CLASSIFY;
     new_task.task_cluster = 0;
+
+    // Send tasks for each cluster of the input file
     for (int i = 0; i < num_clusters; i++) {
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }
-        // printf("sent %d\n", new_task.task_cluster);
-
         new_task.task_cluster++;
-
     }
 
     // Wait then terminate NUM_THREADS threads
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(processor[i], NULL);
-        printf("Thread terminated \n");
     }
 
     // Phase 2: Generate map tasks
+    
+    // while the queue is not empty:
+    
 
     // Phase 3: Generate termination tasks
+
     new_task.task_type = TASK_TERMINATE;
+
+    // Send NUM_PROCESSES tasks to the tasks message queue
     for (int i = 0; i < NUM_PROCESSES; i++) {
-        // send to tasks queue
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
@@ -186,7 +188,6 @@ int main(int argc, char *argv[])
     // Wait for all children to terminate
     for (int i = 0; i < NUM_PROCESSES; i++) {
         wait(NULL);
-        // printf("Children terminated \n");
     }
 
     // Close any open mqds
