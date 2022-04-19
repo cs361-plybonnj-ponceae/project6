@@ -30,7 +30,6 @@ int num_clusters;
 int clusters_processed = 0;  // counter used to break out of process loop
 static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 int num_clusters;
-int clusters_processed = 0;
 struct intqueue headerq;
 
 
@@ -170,10 +169,28 @@ int main(int argc, char *argv[])
         pthread_join(processor[i], NULL);
     }
     // Phase 2
-    while(isempty(&headerq) != 1) {
-        
 
+    int cluster_number;
+    while(isempty(&headerq) != 1) {
+        cluster_number = dequeue(&headerq);
+        lseek(classification_fd, cluster_number, SEEK_SET);
+        unsigned char type;
+        read(classification_fd, &type, 1);
+        if (TYPE_JPG_HEADER & type) {
+        } else {
+        }
+        new_task.task_type = TASK_MAP;
+        strncpy(new_task.task_filename, "file0000", 12);
+        lseek(classification_fd, 0, SEEK_SET);
+
+        // send to tasks queue
+        if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
+            printf("Error sending to tasks queue: %s\n", strerror(errno));
+            return 1;
+        }
+        
     }
+
     
 
     // Phase 3: Generate termination tasks
