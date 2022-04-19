@@ -23,25 +23,54 @@
     
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
-int num_clusters;
-
+int classification_fd;
+static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
-    struct result *new_result;
+    struct result *new_result; 
+    struct intqueue headerq;
+
+    // Initialize an empty queue to store the clusters that have file headers.
+    // This queue needs to be populated in Phase 1 and worked off in Phase 2.
+    initqueue(&headerq);
+
+    printf("Processing \n");
     while(1) {
+
         if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
             return NULL;
-        }         
-    new_result = (struct result *) recv_buffer;
-    printf("Cluster number %d\n", new_result->res_cluster_number);
+        }   
+        
+        // Start of critical section
+        pthread_mutex_lock(&counter_lock);
 
+        // Cast contents of the receiving buffer into the results struct
+        new_result = (struct result *)recv_buffer;
+
+        // seek to location in classification file specified by res_cluster_number
+        lseek(classification_fd, new_result->res_cluster_number, SEEK_SET);
+
+        // write the classification type to the location specified by result
+        write(classification_fd, &new_result->res_cluster_type, 1);
+
+        // If an HTML or JPG header is found, save the value in the queue
+        if (new_result->res_cluster_type & TYPE_HTML_HEADER) { 
+            enqueue(&headerq, new_result->res_cluster_number);
+        } else if (new_result->res_cluster_type & TYPE_JPG_HEADER) {
+            enqueue(&headerq, new_result->res_cluster_number);
+        }
+
+        // printf("Type: %02u\n", new_result->res_cluster_type);
+        // printf("  Type: %d\n", new_result->res_cluster_type);
+
+        // End of critical section
+        pthread_mutex_unlock(&counter_lock);
     }
-
     return NULL;
-
 }
+
 int main(int argc, char *argv[])
 {
     int input_fd;
@@ -50,6 +79,7 @@ int main(int argc, char *argv[])
     char tasks_mq_name[16];
     char results_mq_name[18];
     struct task new_task;
+    int num_clusters;
     pthread_t processor[NUM_THREADS];
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
@@ -66,6 +96,14 @@ int main(int argc, char *argv[])
     input_fd = open(argv[1], O_RDONLY);
     if (input_fd < 0) {
         printf("Error opening file \"%s\" for reading: %s\n", argv[1], strerror(errno));
+        return 1;
+    }
+
+    // Open classification file for writing. Create file if it does not
+    // exist. Exit with error if open() fails.
+    classification_fd = open(CLASSIFICATION_FILE, O_RDWR | O_CREAT, 0600);
+    if (classification_fd < 0) {
+        printf("Error creating file \"%s\": %s\n", CLASSIFICATION_FILE, strerror(errno));
         return 1;
     }
 
@@ -118,14 +156,14 @@ int main(int argc, char *argv[])
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }
+
         new_task.task_cluster++;
+
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(processor[i], NULL);
     }
-      
-    
     // Phase 2
 
     // Phase 3: Generate termination tasks
@@ -137,14 +175,25 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
-    //wait for children to terminate
-    wait(NULL);
-    //close any open mqds
+
+    // Wait for all children to terminate
+    for (int i = 0; i < NUM_PROCESSES; i++) {
+        wait(NULL);
+        printf("Children terminated \n");
+    }
+
+    // Close any open mqds
     mq_close(tasks_mqd);
     mq_close(results_mqd);
-    //unlink mqueues
+
+    // Unlink mqueues
     mq_unlink(tasks_mq_name);
     mq_unlink(results_mq_name);
-    //terminates itself
+
+    // Close files
+    close(classification_fd);
+    close(input_fd);
+
+    // Terminates itself
     return 0;
 };
