@@ -27,11 +27,12 @@ int classification_fd;
 static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 int num_clusters;
 int clusters_processed = 0;
+struct intqueue headerq;
+
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
     struct result *new_result; 
-    struct intqueue headerq;
 
     // Initialize an empty queue to store the clusters that have file headers.
     // This queue needs to be populated in Phase 1 and worked off in Phase 2.
@@ -160,6 +161,10 @@ int main(int argc, char *argv[])
         pthread_join(processor[i], NULL);
     }
     // Phase 2
+    while(isempty(&headerq) != 1) {
+        
+
+    }
     
 
     // Phase 3: Generate termination tasks
