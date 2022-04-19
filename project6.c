@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <stdint.h>
 
 #include "common.h"
 #include "classify.h"
@@ -39,8 +40,6 @@ void *process_result(void *arg) {
 
     // Initialize an empty queue to store the clusters that have file headers.
     initqueue(&headerq);
-
-    printf("Processing \n");
 
     // Keep receiving from the results queue until there are no clusters left to process
     while(clusters_processed != num_clusters) {
@@ -171,17 +170,26 @@ int main(int argc, char *argv[])
     // Phase 2
 
     int cluster_number;
+    uint32_t joffset = 1;
+    uint32_t hoffset = 1;
+    char filename[13];
     while(isempty(&headerq) != 1) {
         cluster_number = dequeue(&headerq);
+        new_task.task_type = TASK_MAP;
+        new_task.task_cluster = cluster_number;
         lseek(classification_fd, cluster_number, SEEK_SET);
         unsigned char type;
         read(classification_fd, &type, 1);
+        close(classification_fd);
         if (TYPE_JPG_HEADER & type) {
+            snprintf(filename, sizeof(filename), "file%04d.jpg", joffset);
+            joffset++;
         } else {
+            snprintf(filename, sizeof(filename), "file%04d.htm", hoffset);
+            hoffset++;
         }
-        new_task.task_type = TASK_MAP;
-        strncpy(new_task.task_filename, "file0000", 12);
-        lseek(classification_fd, 0, SEEK_SET);
+        strncpy(new_task.task_filename, filename, sizeof(filename));
+       
 
         // send to tasks queue
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
@@ -190,8 +198,6 @@ int main(int argc, char *argv[])
         }
         
     }
-
-    
 
     // Phase 3: Generate termination tasks
     new_task.task_type = TASK_TERMINATE;
