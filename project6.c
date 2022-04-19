@@ -174,35 +174,28 @@ int main(int argc, char *argv[])
     // Phase 2: Generate map tasks 
 
     int cluster_number;
-
-    // While the queue is not empty
+    uint32_t joffset = 1;
+    uint32_t hoffset = 1;
+    char filename[13];
     while(isempty(&headerq) != 1) {
 
         // Get the next cluster number from the queue
         cluster_number = dequeue(&headerq);
-
-        unsigned char cluster_type;
-
-        uint32_t joffset = 0000;
-        uint32_t hoffset = 0000;
-        char filename[13];
-
-        // Seek to the specified cluster in the classification file
+        new_task.task_type = TASK_MAP;
+        new_task.task_cluster = cluster_number;
         lseek(classification_fd, cluster_number, SEEK_SET);
-        read(classification_fd, &cluster_type, 1);
-
-        // If the cluster is a JPG Header:
-        if (cluster_type & TYPE_JPG_HEADER) {
-            // Generate a new JPG file name
-            printf("JHEADER: %x\n", cluster_type);
+        unsigned char type;
+        read(classification_fd, &type, 1);
+        close(classification_fd);
+        if (TYPE_JPG_HEADER & type) {
             snprintf(filename, sizeof(filename), "file%04d.jpg", joffset);
             joffset++;
         } else {
-            // Generate a new HTML file name
-            printf("HHEADER: %x\n", cluster_type);
             snprintf(filename, sizeof(filename), "file%04d.htm", hoffset);
             hoffset++;
         }
+        strncpy(new_task.task_filename, filename, sizeof(filename));
+       
 
         // Generate the task message for the cluster, and send it to the tasks queue
         new_task.task_type = TASK_MAP;
