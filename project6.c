@@ -21,9 +21,13 @@
 #include "classify.h"
 #include "intqueue.h"
     
+// Global variables used by both main and process_result
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
+struct intqueue headerq;
 int classification_fd;
+int num_clusters;           
+int clusters_processed = 0;  // counter used to break out of process loop
 static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
 int num_clusters;
 int clusters_processed = 0;
@@ -31,15 +35,20 @@ struct intqueue headerq;
 
 
 void *process_result(void *arg) {
-    char recv_buffer[MESSAGE_SIZE_MAX];
+    char recv_buffer[MESSAGE_SIZE_MAX]; // receiving buffer
     struct result *new_result; 
 
     // Initialize an empty queue to store the clusters that have file headers.
-    // This queue needs to be populated in Phase 1 and worked off in Phase 2.
     initqueue(&headerq);
 
+    printf("Processing \n");
+
+    // Keep receiving from the results queue until there are no clusters left to process
     while(clusters_processed != num_clusters) {
+
         clusters_processed++;
+
+        // Receive from the results message queue
         if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
             return NULL;
@@ -62,7 +71,6 @@ void *process_result(void *arg) {
         } else if (new_result->res_cluster_type & TYPE_JPG_HEADER) {
             enqueue(&headerq, new_result->res_cluster_number);
         }
-        
         // End of critical section
         pthread_mutex_unlock(&counter_lock);
 
@@ -79,6 +87,8 @@ int main(int argc, char *argv[])
     char results_mq_name[18];
     struct task new_task;
     pthread_t processor[NUM_THREADS];
+
+    // Initialize the message queue attributes
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
     attributes.mq_msgsize = MESSAGE_SIZE_MAX;
@@ -134,14 +144,12 @@ int main(int argc, char *argv[])
         printf("Error opening message queue %s: %s\n", tasks_mq_name, strerror(errno));
         return 1;
     }
-
-    // open results message queue 
     if ((results_mqd = mq_open(results_mq_name, O_RDWR | O_CREAT, 0600, &attributes)) < 0) {
         printf("Error opening message queue %s: %s\n", results_mq_name, strerror(errno));
         return 1;
     }
 
-
+    // Create NUM_THREADS threads 
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_create(&(processor[i]), NULL, process_result, NULL);
     }
@@ -157,6 +165,7 @@ int main(int argc, char *argv[])
         new_task.task_cluster++;
     }
 
+    // Wait then terminate NUM_THREADS threads
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(processor[i], NULL);
     }
@@ -180,7 +189,7 @@ int main(int argc, char *argv[])
     // Wait for all children to terminate
     for (int i = 0; i < NUM_PROCESSES; i++) {
         wait(NULL);
-        printf("Children terminated \n");
+        // printf("Children terminated \n");
     }
 
     // Close any open mqds
