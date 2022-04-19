@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <stdint.h>
 
 #include "common.h"
 #include "classify.h"
@@ -180,27 +181,36 @@ int main(int argc, char *argv[])
         // Get the next cluster number from the queue
         cluster_number = dequeue(&headerq);
 
-        // Seek to the correct offset in the classification file
+        unsigned char cluster_type;
+
+        uint32_t joffset = 0000;
+        uint32_t hoffset = 0000;
+        char filename[13];
+
+        // Seek to the specified cluster in the classification file
         lseek(classification_fd, cluster_number, SEEK_SET);
+        read(classification_fd, &cluster_type, 1);
 
-        unsigned char type;
-        read(classification_fd, &type, 1);
-
-        if (TYPE_JPG_HEADER & type) {
+        // If the cluster is a JPG Header:
+        if (cluster_type & TYPE_JPG_HEADER) {
+            // Generate a new JPG file name
+            printf("JHEADER: %x\n", cluster_type);
+            snprintf(filename, sizeof(filename), "file%04d.jpg", joffset);
+            joffset++;
         } else {
+            // Generate a new HTML file name
+            printf("HHEADER: %x\n", cluster_type);
+            snprintf(filename, sizeof(filename), "file%04d.htm", hoffset);
+            hoffset++;
         }
 
-        // Generate the task message for the cluster
+        // Generate the task message for the cluster, and send it to the tasks queue
         new_task.task_type = TASK_MAP;
-        strncpy(new_task.task_filename, "file0000", 12);
-
-        lseek(classification_fd, 0, SEEK_SET);
-
-        // Send the cluster tasks message to the tasks message queue
+        strncpy(&new_task.task_filename, &filename, sizeof(filename));
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
-            return 1;
-        }
+            return 1;   
+        } 
     }
 
     // Phase 3: Generate termination tasks
