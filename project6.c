@@ -25,6 +25,8 @@ mqd_t tasks_mqd, results_mqd; // message queue descriptors
 struct mq_attr attributes;
 int classification_fd;
 static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
+int num_clusters;
+int clusters_processed = 0;
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX];
@@ -35,14 +37,12 @@ void *process_result(void *arg) {
     // This queue needs to be populated in Phase 1 and worked off in Phase 2.
     initqueue(&headerq);
 
-    printf("Processing \n");
-    while(1) {
-
+    while(clusters_processed != num_clusters) {
+        clusters_processed++;
         if (mq_receive(results_mqd, recv_buffer, attributes.mq_msgsize, NULL) < 0) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
             return NULL;
         }   
-        
         // Start of critical section
         pthread_mutex_lock(&counter_lock);
 
@@ -61,12 +61,10 @@ void *process_result(void *arg) {
         } else if (new_result->res_cluster_type & TYPE_JPG_HEADER) {
             enqueue(&headerq, new_result->res_cluster_number);
         }
-
-        // printf("Type: %02u\n", new_result->res_cluster_type);
-        // printf("  Type: %d\n", new_result->res_cluster_type);
-
+        
         // End of critical section
         pthread_mutex_unlock(&counter_lock);
+
     }
     return NULL;
 }
@@ -79,7 +77,6 @@ int main(int argc, char *argv[])
     char tasks_mq_name[16];
     char results_mq_name[18];
     struct task new_task;
-    int num_clusters;
     pthread_t processor[NUM_THREADS];
     attributes.mq_flags = 0;
     attributes.mq_maxmsg = 1000;
@@ -156,15 +153,14 @@ int main(int argc, char *argv[])
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }
-
         new_task.task_cluster++;
-
     }
 
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(processor[i], NULL);
     }
     // Phase 2
+    
 
     // Phase 3: Generate termination tasks
     new_task.task_type = TASK_TERMINATE;
