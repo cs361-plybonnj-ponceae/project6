@@ -17,6 +17,7 @@
 #include <time.h>
 #include <sys/wait.h>
 #include <stdint.h>
+#include <semaphore.h>
 
 #include "common.h"
 #include "classify.h"
@@ -169,10 +170,11 @@ int main(int argc, char *argv[])
     }
     // Phase 2
 
-    int cluster_number;
+    uint32_t cluster_number;
     uint32_t joffset = 1;
     uint32_t hoffset = 1;
-    char filename[13];
+    char jfilename[13];
+    char hfilename[13];
     while(isempty(&headerq) != 1) {
         cluster_number = dequeue(&headerq);
         new_task.task_type = TASK_MAP;
@@ -180,24 +182,26 @@ int main(int argc, char *argv[])
         lseek(classification_fd, cluster_number, SEEK_SET);
         unsigned char type;
         read(classification_fd, &type, 1);
-        close(classification_fd);
-        if (TYPE_JPG_HEADER & type) {
-            snprintf(filename, sizeof(filename), "file%04d.jpg", joffset);
+        if (type == 0x3) {
+            snprintf(jfilename, sizeof(jfilename), "file%04d.jpg", joffset);
             joffset++;
+            strncpy(new_task.task_filename, jfilename, sizeof(new_task.task_filename));  
+
         } else {
-            snprintf(filename, sizeof(filename), "file%04d.htm", hoffset);
+            snprintf(hfilename, sizeof(hfilename), "file%04d.htm", hoffset);
             hoffset++;
+            strncpy(new_task.task_filename, hfilename, sizeof(new_task.task_filename));  
+
         }
-        strncpy(new_task.task_filename, filename, sizeof(filename));
-       
 
         // send to tasks queue
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
-        }
-        
+        }        
     }
+
+
 
     // Phase 3: Generate termination tasks
     new_task.task_type = TASK_TERMINATE;
