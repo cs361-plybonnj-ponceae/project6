@@ -24,16 +24,14 @@
 #include "intqueue.h"
     
 // Global variables used by both main and process_result
+
 mqd_t tasks_mqd, results_mqd; // message queue descriptors
-struct mq_attr attributes;
-struct intqueue headerq;
+struct mq_attr attributes;    // message queue attributes
+struct intqueue headerq;      
 int classification_fd;
 int num_clusters;           
 int clusters_processed = 0;  // counter used to break out of process loop
 static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
-int num_clusters;
-struct intqueue headerq;
-
 
 void *process_result(void *arg) {
     char recv_buffer[MESSAGE_SIZE_MAX]; // receiving buffer
@@ -52,11 +50,12 @@ void *process_result(void *arg) {
             printf("Error receiving message from results queue: %s\n", strerror(errno));
             return NULL;
         }   
-        // Start of critical section
-        pthread_mutex_lock(&counter_lock);
-
+        
         // Cast contents of the receiving buffer into the results struct
         new_result = (struct result *)recv_buffer;
+
+        // Start of critical section (Protect seeking and writing)
+        pthread_mutex_lock(&counter_lock);
 
         // seek to location in classification file specified by res_cluster_number
         lseek(classification_fd, new_result->res_cluster_number, SEEK_SET);
@@ -64,14 +63,15 @@ void *process_result(void *arg) {
         // write the classification type to the location specified by result
         write(classification_fd, &new_result->res_cluster_type, 1);
 
+        // End of critical section
+        pthread_mutex_unlock(&counter_lock);
+
         // If an HTML or JPG header is found, save the value in the queue
         if (new_result->res_cluster_type & TYPE_HTML_HEADER) { 
             enqueue(&headerq, new_result->res_cluster_number);
         } else if (new_result->res_cluster_type & TYPE_JPG_HEADER) {
             enqueue(&headerq, new_result->res_cluster_number);
         }
-        // End of critical section
-        pthread_mutex_unlock(&counter_lock);
 
     }
     return NULL;
@@ -155,6 +155,7 @@ int main(int argc, char *argv[])
         
     // Phase 1: Generate classification tasks and process results
 
+    // Initialize task to classifying
     new_task.task_type = TASK_CLASSIFY;
     new_task.task_cluster = 0;
 
@@ -178,37 +179,45 @@ int main(int argc, char *argv[])
     uint32_t offset = 1;
     char filename[13];
 
+    // Loop while the queue is not empty
     while(isempty(&headerq) != 1) {
 
         // Get the next cluster number from the queue
         cluster_number = dequeue(&headerq);
 
+        // Initialize tasks to mapping
         new_task.task_type = TASK_MAP;
         new_task.task_cluster = cluster_number;
 
+        // Seek to the specified cluster in the classification file
         lseek(classification_fd, cluster_number, SEEK_SET);
 
         unsigned char type;
+
+        // Read and save the contents of the cluster
         read(classification_fd, &type, 1);
+
+        // If the cluster is of type JPG Header
         if (type == 0x3) {
+            // Generate a new JPG filename
             snprintf(filename, sizeof(filename), "file%04d.jpg", offset);
             offset++;
             strncpy(new_task.task_filename, filename, sizeof(new_task.task_filename));  
-
+            
+        // If the cluster if of type HTML Header
         } else {
+            // Generate a new HTML filename
             snprintf(filename, sizeof(filename), "file%04d.htm", offset);
             offset++;
             strncpy(new_task.task_filename, filename, sizeof(new_task.task_filename));  
         }
 
-        // send to tasks queue
+        // Send to the tasks message queue
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;
         }        
     }
-
-
 
     // Phase 3: Generate termination tasks
 
