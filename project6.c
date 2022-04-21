@@ -171,27 +171,24 @@ int main(int argc, char *argv[])
     // Phase 2
 
     uint32_t cluster_number;
-    uint32_t joffset = 1;
-    uint32_t hoffset = 1;
-    char jfilename[13];
-    char hfilename[13];
+    uint32_t offset = 1;
+    char filename[13];
     while(isempty(&headerq) != 1) {
         cluster_number = dequeue(&headerq);
         new_task.task_type = TASK_MAP;
         new_task.task_cluster = cluster_number;
         lseek(classification_fd, cluster_number, SEEK_SET);
         unsigned char type;
-        read(classification_fd, &type, 1);
+        int bytesread = read(classification_fd, &type, 1);
         if (type == 0x3) {
-            snprintf(jfilename, sizeof(jfilename), "file%04d.jpg", joffset);
-            joffset++;
-            strncpy(new_task.task_filename, jfilename, sizeof(new_task.task_filename));  
+            snprintf(filename, sizeof(filename), "file%04d.jpg", offset);
+            offset++;
+            strncpy(new_task.task_filename, filename, sizeof(new_task.task_filename));  
 
         } else {
-            snprintf(hfilename, sizeof(hfilename), "file%04d.htm", hoffset);
-            hoffset++;
-            strncpy(new_task.task_filename, hfilename, sizeof(new_task.task_filename));  
-
+            snprintf(filename, sizeof(filename), "file%04d.htm", offset);
+            offset++;
+            strncpy(new_task.task_filename, filename, sizeof(new_task.task_filename));  
         }
 
         // send to tasks queue
