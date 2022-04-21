@@ -177,14 +177,19 @@ int main(int argc, char *argv[])
     uint32_t joffset = 1;
     uint32_t hoffset = 1;
     char filename[13];
+
     while(isempty(&headerq) != 1) {
 
         // Get the next cluster number from the queue
         cluster_number = dequeue(&headerq);
+
         new_task.task_type = TASK_MAP;
         new_task.task_cluster = cluster_number;
+
         lseek(classification_fd, cluster_number, SEEK_SET);
+
         unsigned char type;
+
         read(classification_fd, &type, 1);
         close(classification_fd);
         if (TYPE_JPG_HEADER & type) {
@@ -194,12 +199,10 @@ int main(int argc, char *argv[])
             snprintf(filename, sizeof(filename), "file%04d.htm", hoffset);
             hoffset++;
         }
-        strncpy(new_task.task_filename, filename, sizeof(filename));
        
-
         // Generate the task message for the cluster, and send it to the tasks queue
         new_task.task_type = TASK_MAP;
-        strncpy(&new_task.task_filename, &filename, sizeof(filename));
+        strncpy(new_task.task_filename, filename, sizeof(new_task.task_filename));
         if (mq_send(tasks_mqd, (const char *) &new_task, sizeof(new_task), 0) < 0) {
             printf("Error sending to tasks queue: %s\n", strerror(errno));
             return 1;   
